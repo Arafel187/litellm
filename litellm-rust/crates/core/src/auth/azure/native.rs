@@ -22,6 +22,12 @@ use super::credential_provider_cache::{
     AzureCredentialProviderCache, AzureCredentialProviderCacheKey,
 };
 
+const REQUEST_AUTHORITY_HOSTS: [&str; 3] = [
+    "login.microsoftonline.com",
+    "login.microsoftonline.us",
+    "login.chinacloudapi.cn",
+];
+
 #[derive(Clone, Debug)]
 pub(crate) enum NativeAzureRequest {
     ClientSecret {
@@ -262,6 +268,16 @@ fn validate_authority(request: &NativeAzureRequest) -> Result<(), AuthError> {
         || url.query().is_some()
         || url.fragment().is_some()
         || !matches!(url.path(), "" | "/")
+    {
+        return Err(AuthError::Configuration(
+            AuthConfigurationError::InvalidAzureAuthority,
+        ));
+    }
+    if authority.source() == InputSource::Request
+        && (url.port().is_some()
+            || !url
+                .host_str()
+                .is_some_and(|host| REQUEST_AUTHORITY_HOSTS.contains(&host)))
     {
         return Err(AuthError::Configuration(
             AuthConfigurationError::InvalidAzureAuthority,
@@ -655,7 +671,7 @@ mod tests {
         let error = ValidatedAzureRequest::new(sourced_client_secret(
             InputSource::Deployment,
             InputSource::Request,
-            "https://login.example",
+            "https://login.microsoftonline.com",
         ))
         .unwrap_err();
 
@@ -668,15 +684,38 @@ mod tests {
     }
 
     #[test]
-    fn request_owned_client_secret_identity_can_select_custom_authority() {
+    fn request_owned_client_secret_identity_can_select_azure_authority() {
         let request = ValidatedAzureRequest::new(sourced_client_secret(
             InputSource::Request,
             InputSource::Request,
-            "https://login.example",
+            "https://login.microsoftonline.com",
         ))
         .unwrap();
 
         assert_eq!(request.credential_source(), InputSource::Request);
+    }
+
+    #[test]
+    fn request_owned_client_secret_identity_rejects_untrusted_authority() {
+        for authority in [
+            "https://127.0.0.1",
+            "https://169.254.169.254",
+            "https://login.microsoftonline.com.attacker.example",
+            "https://login.microsoftonline.com:8443",
+        ] {
+            let error = ValidatedAzureRequest::new(sourced_client_secret(
+                InputSource::Request,
+                InputSource::Request,
+                authority,
+            ))
+            .unwrap_err();
+            assert!(matches!(
+                error,
+                crate::AuthError::Configuration(
+                    crate::auth::error::AuthConfigurationError::InvalidAzureAuthority
+                )
+            ));
+        }
     }
 
     #[test]
