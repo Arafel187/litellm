@@ -195,6 +195,14 @@ def build_request(
     )
 
 
+def run_rust_ocr(*, request, resolve_api_key):
+    return rust_bridge.run(
+        request=request,
+        resolve_secret=resolve_api_key,
+        convert_file_document=ocr_main.convert_file_document_to_url_document,
+    )
+
+
 @pytest.fixture(autouse=True)
 def _reset_rust_flag():
     """Keep the global toggle isolated between tests."""
@@ -442,7 +450,7 @@ def test_run_rust_ocr_prepares_request_and_wraps_response():
     litellm.rust(True)
     rust_bridge._OCR.override(bridge)
 
-    response = ocr_main._run_rust_ocr(
+    response = run_rust_ocr(
         request=build_request(
             logging_obj=logging_obj,
             api_base="https://proxy.internal",
@@ -470,14 +478,11 @@ def test_run_rust_ocr_prepares_request_and_wraps_response():
     }
 
 
-def test_rust_upstream_error_uses_ocr_provider_error_mapping():
+def test_rust_upstream_error_uses_ocr_provider_error_mapping(monkeypatch: pytest.MonkeyPatch):
     error = RustUpstreamError(400, '{"message":"invalid model"}')
+    monkeypatch.setattr(rust_bridge, "native_exception_types", lambda: (RuntimeError, RustUpstreamError))
 
-    mapped = ocr_main._map_rust_ocr_error(
-        error,
-        build_request(),
-        (RuntimeError, RustUpstreamError),
-    )
+    mapped = rust_bridge._map_error(error, build_request())
 
     assert isinstance(mapped, BaseLLMException)
     assert mapped.status_code == 400
@@ -489,7 +494,7 @@ def test_run_rust_ocr_resolves_key_via_secret_manager_when_missing():
     litellm.rust(True)
     rust_bridge._OCR.override(bridge)
 
-    ocr_main._run_rust_ocr(
+    run_rust_ocr(
         request=build_request(api_key=None, timeout=None),
         resolve_api_key=lambda name: "sk-from-vault" if name == "MISTRAL_API_KEY" else None,
     )
@@ -505,7 +510,7 @@ def test_run_rust_ocr_prefers_explicit_key_over_resolver():
     def _resolver(name: str) -> str | None:
         raise AssertionError(f"resolver should not be called for {name}")
 
-    ocr_main._run_rust_ocr(
+    run_rust_ocr(
         request=build_request(
             api_key="sk-explicit",
             timeout=None,
@@ -526,7 +531,7 @@ def test_run_rust_ocr_uses_mistral_secret_manager_without_provider_config():
         resolver_calls.append(name)
         return "sk-provider-env"
 
-    ocr_main._run_rust_ocr(
+    run_rust_ocr(
         request=build_request(
             model="mistral-ocr-latest",
             api_key=None,
@@ -544,7 +549,7 @@ def test_prepare_rust_ocr_call_forwards_vertex_routing_metadata():
     litellm.rust(True)
     rust_bridge._OCR.override(bridge)
 
-    ocr_main._run_rust_ocr(
+    run_rust_ocr(
         request=build_request(
             custom_llm_provider="vertex_ai",
             model="mistral-ocr-maas",
@@ -578,7 +583,7 @@ def test_prepare_rust_ocr_call_resolves_vertex_routing_metadata_from_secret_mana
             "VERTEXAI_LOCATION": "us-east5",
         }.get(name)
 
-    ocr_main._run_rust_ocr(
+    run_rust_ocr(
         request=build_request(
             custom_llm_provider="vertex_ai",
             model="mistral-ocr-maas",
@@ -596,7 +601,7 @@ def test_prepare_rust_ocr_call_defers_azure_environment_resolution_to_rust():
     litellm.rust(True)
     rust_bridge._OCR.override(bridge)
 
-    ocr_main._run_rust_ocr(
+    run_rust_ocr(
         request=build_request(
             custom_llm_provider="azure_ai",
             model="pixtral-12b-2409",
@@ -617,7 +622,7 @@ def test_prepare_rust_ocr_call_defers_document_intelligence_environment_to_rust(
     litellm.rust(True)
     rust_bridge._OCR.override(bridge)
 
-    ocr_main._run_rust_ocr(
+    run_rust_ocr(
         request=build_request(
             custom_llm_provider="azure_ai",
             model="doc-intelligence/prebuilt-layout",
@@ -635,7 +640,7 @@ def test_prepare_rust_ocr_call_forwards_raw_azure_auth_inputs():
     litellm.rust(True)
     rust_bridge._OCR.override(bridge)
 
-    ocr_main._run_rust_ocr(
+    run_rust_ocr(
         request=build_request(
             custom_llm_provider="azure_ai",
             model="pixtral-12b-2409",
@@ -684,20 +689,24 @@ def test_prepare_rust_ocr_call_preserves_proxy_input_sources():
         "client_secret": "secret",
         "azure_authority_host": "https://login.example.com",
         "api_base": "https://azure.example.com",
+        "api_key": "request-secret",
     }
 
-    ocr_main._run_rust_ocr(
+    run_rust_ocr(
         request=build_request(
             custom_llm_provider="azure_ai",
             model="pixtral-12b-2409",
-            api_key=None,
+            api_key="request-secret",
             api_base="https://azure.example.com",
             litellm_params={
                 "tenant_id": "tenant",
                 "client_id": "client",
                 "client_secret": "secret",
                 "azure_authority_host": "https://login.example.com",
-                "proxy_server_request": {"body": request_values},
+                "proxy_server_request": {
+                    "body": {name: value for name, value in request_values.items() if name != "api_key"},
+                    "body_fields": list(request_values),
+                },
             },
         ),
         resolve_api_key=lambda _name: None,
@@ -712,7 +721,7 @@ def test_rust_ocr_logging_redacts_azure_credentials():
     litellm.rust(True)
     rust_bridge._OCR.override(bridge)
 
-    ocr_main._run_rust_ocr(
+    run_rust_ocr(
         request=build_request(
             logging_obj=logging_obj,
             custom_llm_provider="azure_ai",
@@ -742,7 +751,7 @@ def test_rust_eligibility_rejects_python_only_azure_auth_modes():
         {"azure_username": "user"},
         {"azure_password": "password"},
     ):
-        assert not ocr_main._rust_ocr_supported(
+        assert not rust_bridge.supported(
             build_request(
                 custom_llm_provider="azure_ai",
                 model="pixtral-12b-2409",
@@ -757,7 +766,7 @@ def test_prepare_rust_ocr_call_forwards_global_azure_refresh(monkeypatch: pytest
     rust_bridge._OCR.override(bridge)
     monkeypatch.setattr(litellm, "enable_azure_ad_token_refresh", True)
 
-    ocr_main._run_rust_ocr(
+    run_rust_ocr(
         request=build_request(
             custom_llm_provider="azure_ai",
             model="pixtral-12b-2409",
@@ -779,7 +788,7 @@ def test_run_rust_ocr_runs_pre_call_logging():
     litellm.rust(True)
     rust_bridge._OCR.override(bridge)
 
-    ocr_main._run_rust_ocr(
+    run_rust_ocr(
         request=build_request(
             logging_obj=logging_obj,
             api_base="https://api.mistral.ai/v1",

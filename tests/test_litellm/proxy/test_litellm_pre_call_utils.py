@@ -710,6 +710,7 @@ async def test_add_litellm_data_to_request_body_snapshot_excludes_secret_fields(
     data = {
         "model": "gpt-3.5-turbo",
         "messages": [{"role": "user", "content": "hello"}],
+        "api_key": "request-secret",
     }
 
     user_api_key_dict = UserAPIKeyAuth(
@@ -739,6 +740,8 @@ async def test_add_litellm_data_to_request_body_snapshot_excludes_secret_fields(
 
     # But the body snapshot must NOT contain secret_fields
     snapshot_body = updated["proxy_server_request"]["body"]
+    assert "api_key" in updated["proxy_server_request"]["body_fields"]
+    assert "api_key" not in snapshot_body
     assert "secret_fields" not in snapshot_body, (
         "secret_fields must be excluded from proxy_server_request['body'] "
         "to prevent Authorization tokens from leaking into spend logs"

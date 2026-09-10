@@ -2014,6 +2014,7 @@ async def add_litellm_data_to_request(
         "url": str(request.url),
         "method": request.method,
         "headers": _logging_safe_headers,
+        "body_fields": list(data),  # Preserve provenance when credential values are omitted from body.
         "body": None,  # filled in post-strip; see below
         "arrival_time": arrival_time,  # Track when request arrived at proxy
     }
