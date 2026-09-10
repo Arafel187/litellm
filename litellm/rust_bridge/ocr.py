@@ -12,7 +12,7 @@ import httpx
 import litellm
 from litellm.constants import request_timeout
 from litellm.llms.azure_ai.ocr.common_utils import is_azure_cohere_parse_model
-from litellm.llms.base_llm.ocr.transformation import OCR_REQUEST_FORMAT_PARAM, OCRResponse
+from litellm.llms.base_llm.ocr.transformation import PROVIDER_NATIVE_RESPONSE_KEY, OCRResponse
 from litellm.rust_bridge.bindings import NativeBinding, native_exception_types
 from litellm.rust_bridge.timeouts import timeout_to_seconds as _timeout_to_seconds
 from litellm.types.router import GenericLiteLLMParams
@@ -140,7 +140,7 @@ def provider(request: LiteLLMOcrRequest) -> str | None:
 
 def supported(request: LiteLLMOcrRequest) -> bool:
     request_provider: Final = provider(request)
-    if request_provider not in _RUST_OCR_PROVIDERS or request.kwargs.get(OCR_REQUEST_FORMAT_PARAM) == "native":
+    if request_provider not in _RUST_OCR_PROVIDERS:
         return False
     if request_provider == "azure_ai":
         return (
@@ -308,6 +308,16 @@ def _map_error(error: Exception, request: LiteLLMOcrRequest) -> Exception:
     )
 
 
+def _response(response: Mapping[str, object]) -> OCRResponse:
+    provider_native_response: Final = response.get(PROVIDER_NATIVE_RESPONSE_KEY)
+    normalized: Final = OCRResponse.model_validate(
+        {key: value for key, value in response.items() if key != PROVIDER_NATIVE_RESPONSE_KEY}
+    )
+    if isinstance(provider_native_response, Mapping):
+        normalized.set_provider_native_response(provider_native_response)
+    return normalized
+
+
 def run(
     request: LiteLLMOcrRequest,
     resolve_secret: Callable[[str], str | None],
@@ -330,7 +340,7 @@ def run(
         )
     except Exception as error:
         raise _map_error(error, request) from error
-    return OCRResponse.model_validate(response) if response is not None else None
+    return _response(response) if response is not None else None
 
 
 async def arun(
@@ -355,7 +365,7 @@ async def arun(
         )
     except Exception as error:
         raise _map_error(error, request) from error
-    return OCRResponse.model_validate(response) if response is not None else None
+    return _response(response) if response is not None else None
 
 
 def ocr(
