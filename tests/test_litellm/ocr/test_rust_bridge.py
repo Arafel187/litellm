@@ -618,6 +618,7 @@ def test_prepare_rust_ocr_call_resolves_vertex_routing_metadata_from_secret_mana
         return {
             "VERTEXAI_PROJECT": "project-from-secret",
             "VERTEXAI_LOCATION": "us-east5",
+            "VERTEXAI_CREDENTIALS": "credentials-from-secret",
         }.get(name)
 
     run_rust_ocr(
@@ -631,6 +632,7 @@ def test_prepare_rust_ocr_call_resolves_vertex_routing_metadata_from_secret_mana
 
     assert bridge.calls[0]["optional_params"]["vertex_project"] == "project-from-secret"
     assert bridge.calls[0]["optional_params"]["vertex_location"] == "us-east5"
+    assert bridge.calls[0]["optional_params"]["vertex_credentials"] == "credentials-from-secret"
 
 
 def test_prepare_rust_ocr_call_defers_azure_environment_resolution_to_rust():
