@@ -2014,7 +2014,7 @@ async def add_litellm_data_to_request(
         "url": str(request.url),
         "method": request.method,
         "headers": _logging_safe_headers,
-        "body_fields": list(data),  # mutable-ok: persisted proxy metadata uses JSON lists to preserve request field presence
+        "body_fields": list(data),  # mutable-ok: proxy metadata requires a JSON list of request fields
         "body": None,  # filled in post-strip; see below
         "arrival_time": arrival_time,  # Track when request arrived at proxy
     }
