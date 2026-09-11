@@ -311,7 +311,7 @@ def _map_error(error: Exception, request: LiteLLMOcrRequest) -> Exception:
 def _response(response: Mapping[str, object]) -> OCRResponse:
     provider_native_response: Final = response.get(PROVIDER_NATIVE_RESPONSE_KEY)
     normalized: Final = OCRResponse.model_validate(
-        {key: value for key, value in response.items() if key != PROVIDER_NATIVE_RESPONSE_KEY}
+        MappingProxyType({key: value for key, value in response.items() if key != PROVIDER_NATIVE_RESPONSE_KEY})
     )
     if isinstance(provider_native_response, Mapping):
         normalized.set_provider_native_response(provider_native_response)
