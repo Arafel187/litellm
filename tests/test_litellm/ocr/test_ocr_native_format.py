@@ -7,7 +7,7 @@ bridge (which only returns the normalized shape) must not serve native requests.
 import pytest
 
 import litellm
-from litellm.ocr.main import _rust_ocr_supported
+from litellm.rust_bridge import ocr as rust_ocr_bridge
 from litellm.rust_bridge.ocr import LiteLLMOcrRequest
 
 DOCUMENT = {"type": "document_url", "document_url": "https://example.com/doc.pdf"}
@@ -30,16 +30,16 @@ def _request(
 
 @pytest.mark.parametrize("optional_params", [{}, {"req_format": "litellm"}])
 def test_rust_ocr_serves_default_format(optional_params):
-    assert _rust_ocr_supported(_request(optional_params)) is True
+    assert rust_ocr_bridge.supported(_request(optional_params)) is True
 
 
 def test_rust_ocr_skipped_for_native_format():
-    assert _rust_ocr_supported(_request({"req_format": "native"})) is False
+    assert rust_ocr_bridge.supported(_request({"req_format": "native"})) is False
 
 
 @pytest.mark.parametrize("model", ["cohere/cohere-parse", "azure_ai/cohere-parse"])
 def test_rust_ocr_skipped_for_unsupported_models(model):
-    assert _rust_ocr_supported(_request({}, model)) is False
+    assert rust_ocr_bridge.supported(_request({}, model)) is False
 
 
 @pytest.mark.asyncio
