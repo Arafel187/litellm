@@ -241,6 +241,7 @@ async def aocr(
         )
         ```
     """
+    call_completion: Final = kwargs.pop("_litellm_call_completion", None)
     completion_kwargs: Final[dict[str, object]] = {
         "model": model,
         "document": document,
@@ -260,6 +261,7 @@ async def aocr(
         custom_llm_provider=custom_llm_provider,
         extra_headers=extra_headers,
         kwargs=kwargs,
+        call_completion=call_completion,
     )
     try:
         if rust_enabled() and rust_ocr_bridge.supported(request):
@@ -534,6 +536,7 @@ def ocr(
             print(f"Page {page.index}: {page.markdown}")
         ```
     """
+    call_completion: Final = kwargs.pop("_litellm_call_completion", None)
     completion_kwargs: Final[dict[str, object]] = {
         "model": model,
         "document": document,
@@ -553,6 +556,7 @@ def ocr(
         custom_llm_provider=custom_llm_provider,
         extra_headers=extra_headers,
         kwargs=kwargs,
+        call_completion=call_completion,
     )
     try:
         _is_async: Final = kwargs.pop("aocr", False) is True
