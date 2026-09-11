@@ -3,7 +3,7 @@
 import builtins
 import importlib
 import types
-from typing import Final
+from typing import Final, cast
 
 import httpx
 import pytest
@@ -378,6 +378,12 @@ def test_timeout_to_seconds_handles_float_timeout_and_none():
     assert rust_bridge._timeout_to_seconds(httpx.Timeout(30.0, read=42.0)) == 42.0
 
 
+def test_provider_recognizes_unprefixed_mistral_ocr_model():
+    request = build_request(model="mistral-ocr-latest", custom_llm_provider=None)
+
+    assert rust_bridge.provider(request) == "mistral"
+
+
 def test_bridge_wrapper_forwards_prepared_args_and_wraps_response():
     bridge = RecordingBridge()
 
@@ -488,6 +494,36 @@ def test_rust_upstream_error_uses_ocr_provider_error_mapping(monkeypatch: pytest
     assert isinstance(mapped, BaseLLMException)
     assert mapped.status_code == 400
     assert mapped.message == '{"message":"invalid model"}'
+
+
+def test_rust_upstream_error_without_provider_is_preserved(monkeypatch: pytest.MonkeyPatch):
+    error = RustUpstreamError(500, "upstream failed")
+    request = build_request(model="custom-model", custom_llm_provider=None)
+    monkeypatch.setattr(rust_bridge, "native_exception_types", lambda: (RuntimeError, RustUpstreamError))
+
+    assert rust_bridge._map_error(error, request) is error
+
+
+def test_rust_upstream_error_without_provider_config_is_preserved(monkeypatch: pytest.MonkeyPatch):
+    error = RustUpstreamError(500, "upstream failed")
+    monkeypatch.setattr(rust_bridge, "native_exception_types", lambda: (RuntimeError, RustUpstreamError))
+    monkeypatch.setattr(rust_bridge.ProviderConfigManager, "get_provider_ocr_config", lambda **_kwargs: None)
+
+    assert rust_bridge._map_error(error, build_request()) is error
+
+
+def test_run_rust_ocr_rejects_non_mapping_document():
+    bridge = RecordingBridge()
+    litellm.rust(True)
+    rust_bridge._OCR.override(bridge)
+
+    with pytest.raises(TypeError, match="document must be a dict"):
+        run_rust_ocr(
+            request=build_request(document=cast(dict[str, object], [])),
+            resolve_api_key=lambda _name: None,
+        )
+
+    assert bridge.calls == []
 
 
 def test_run_rust_ocr_resolves_key_via_secret_manager_when_missing():
