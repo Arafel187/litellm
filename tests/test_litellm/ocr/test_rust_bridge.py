@@ -3,6 +3,7 @@
 import builtins
 import importlib
 import types
+from typing import Final
 
 import httpx
 import pytest
@@ -971,6 +972,30 @@ def test_ocr_does_not_route_to_rust_when_disabled():
     # The impl stays available for injection, but the disabled flag gates usage,
     # so ocr() never reaches the Rust path (asserted via the enabled-path test).
     assert bridge.calls == []
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.asyncio
+async def test_python_validation_error_preserves_original_context(asynchronous: bool, enabled: bool) -> None:
+    litellm.rust(enabled)
+    rust_bridge._OCR.override(None)
+    rust_bridge._AOCR.override(None)
+
+    async def invoke() -> None:
+        if asynchronous:
+            await litellm.aocr(model=MODEL, document={"type": "invalid"}, api_key="test-key")
+        else:
+            litellm.ocr(model=MODEL, document={"type": "invalid"}, api_key="test-key")
+
+    with pytest.raises(litellm.APIConnectionError) as exc_info:
+        await invoke()
+    error: Final = exc_info.value
+    assert error.model == MODEL
+    assert error.llm_provider is None
+    assert str(error).splitlines()[0] == (
+        "litellm.APIConnectionError: Invalid document type: invalid. Must be 'document_url', 'image_url', or 'file'"
+    )
 
 
 def test_ocr_falls_back_to_python_when_bridge_unavailable(monkeypatch):

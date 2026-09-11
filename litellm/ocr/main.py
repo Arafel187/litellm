@@ -275,6 +275,18 @@ async def aocr(
             else:
                 return rust_response
 
+    except Exception as e:
+        error_provider: Final = custom_llm_provider or rust_ocr_bridge.provider(request)
+        error_model: Final = model.removeprefix(f"{error_provider}/") if error_provider else model
+        raise litellm.exception_type(
+            model=error_model,
+            custom_llm_provider=error_provider,
+            original_exception=e,
+            completion_kwargs=completion_kwargs,
+            extra_kwargs=kwargs,
+        )
+
+    try:
         prepared: Final = _prepare_ocr_request(
             model=model,
             document=document,
@@ -312,11 +324,9 @@ async def aocr(
 
         return response
     except Exception as e:
-        error_provider: Final = custom_llm_provider or rust_ocr_bridge.provider(request)
-        error_model: Final = model.removeprefix(f"{error_provider}/") if error_provider else model
         raise litellm.exception_type(
-            model=error_model,
-            custom_llm_provider=error_provider,
+            model=model,
+            custom_llm_provider=custom_llm_provider,
             original_exception=e,
             completion_kwargs=completion_kwargs,
             extra_kwargs=kwargs,
@@ -560,6 +570,18 @@ def ocr(
             else:
                 return rust_response
 
+    except Exception as e:
+        error_provider: Final = custom_llm_provider or rust_ocr_bridge.provider(request)
+        error_model: Final = model.removeprefix(f"{error_provider}/") if error_provider else model
+        raise litellm.exception_type(
+            model=error_model,
+            custom_llm_provider=error_provider,
+            original_exception=e,
+            completion_kwargs=completion_kwargs,
+            extra_kwargs=kwargs,
+        )
+
+    try:
         prepared: Final = _prepare_ocr_request(
             model=model,
             document=document,
@@ -591,11 +613,9 @@ def ocr(
 
         return response
     except Exception as e:
-        error_provider: Final = custom_llm_provider or rust_ocr_bridge.provider(request)
-        error_model: Final = model.removeprefix(f"{error_provider}/") if error_provider else model
         raise litellm.exception_type(
-            model=error_model,
-            custom_llm_provider=error_provider,
+            model=model,
+            custom_llm_provider=custom_llm_provider,
             original_exception=e,
             completion_kwargs=completion_kwargs,
             extra_kwargs=kwargs,
