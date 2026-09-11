@@ -1262,3 +1262,36 @@ def test_timeout_classification_follows_the_explicit_cause_chain_only():
     assert _is_redis_timeout_failure(chained.value) is True
     assert _is_redis_timeout_failure(contextual.value) is False
     assert _is_redis_timeout_failure(RedisConnectionError("refused")) is False
+
+
+def test_py310_asyncio_timeout_error_cause_is_a_timeout_failure(monkeypatch):
+    """On py3.10 asyncio.TimeoutError is not TimeoutError, so listing only TimeoutError misses it.
+
+    CI is 3.12, where the two names are the same class and the existing cause-chain test would
+    pass without the explicit entry. Substitute a distinct class to lock the 3.10 path.
+    """
+    import importlib
+
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    from litellm.caching.redis_cache import _is_redis_timeout_failure, _redis_timeout_error_types
+
+    class Py310AsyncioTimeoutError(Exception):
+        pass
+
+    redis_cache = importlib.import_module("litellm.caching.redis_cache")
+    _redis_timeout_error_types.cache_clear()
+    monkeypatch.setattr(redis_cache.asyncio, "TimeoutError", Py310AsyncioTimeoutError)
+
+    def raise_pool_wait_timeout() -> None:
+        try:
+            raise Py310AsyncioTimeoutError()
+        except Py310AsyncioTimeoutError as err:
+            raise RedisConnectionError("No connection available.") from err
+
+    try:
+        with pytest.raises(RedisConnectionError) as chained:
+            raise_pool_wait_timeout()
+        assert _is_redis_timeout_failure(chained.value) is True
+    finally:
+        _redis_timeout_error_types.cache_clear()
