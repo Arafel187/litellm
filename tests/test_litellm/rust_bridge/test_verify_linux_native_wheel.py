@@ -56,10 +56,11 @@ def _write_wheel(
     metadata_tags: tuple[str, ...] | None = (_EXPECTED_TAG,),
     dist_info: str = _DIST_INFO,
     duplicate_wheel: bool = False,
+    native_content: bytes = b"synthetic native extension",
 ) -> Path:
     wheel: Final = tmp_path / f"litellm-1.100.0-{filename_tag}.whl"
     with zipfile.ZipFile(wheel, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr(_NATIVE_MEMBER, b"synthetic native extension")
+        archive.writestr(_NATIVE_MEMBER, native_content)
         archive.writestr(
             f"{dist_info}/METADATA",
             "Metadata-Version: 2.1\nName: litellm\nVersion: 1.100.0\n",
@@ -195,3 +196,10 @@ def test_rejects_production_module_exposing_panic_hook(tmp_path: Path) -> None:
     wheel: Final = _write_wheel(tmp_path, filename_tag=_EXPECTED_TAG)
 
     assert _run_verifier(wheel, exposes_panic=True) == 1
+
+
+@pytest.mark.parametrize(("size", "expected"), ((25_000_000, 0), (25_000_001, 1)))
+def test_native_extension_size_limit(tmp_path: Path, size: int, expected: int) -> None:
+    wheel: Final = _write_wheel(tmp_path, filename_tag=_EXPECTED_TAG, native_content=b"x" * size)
+
+    assert _run_verifier(wheel) == expected

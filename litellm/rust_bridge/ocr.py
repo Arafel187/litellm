@@ -152,16 +152,18 @@ def supported(request: LiteLLMOcrRequest) -> bool:
     return True
 
 
-def _optional_params(request: LiteLLMOcrRequest, resolve_secret: Callable[[str], str | None]) -> dict[str, object]:
-    optional_params: Final = {
-        name: value
-        for name, value in request.kwargs.items()
-        if (name not in GenericLiteLLMParams.model_fields or name in _RUST_OCR_CONFIG_FIELDS)
-        and name not in {"litellm_logging_obj", "aocr", "litellm_call_id", "proxy_server_request"}
-    }
+def _optional_params(request: LiteLLMOcrRequest, resolve_secret: Callable[[str], str | None]) -> Mapping[str, object]:
+    optional_params: Final = MappingProxyType(
+        {
+            name: value
+            for name, value in request.kwargs.items()
+            if (name not in GenericLiteLLMParams.model_fields or name in _RUST_OCR_CONFIG_FIELDS)
+            and name not in ("litellm_logging_obj", "aocr", "litellm_call_id", "proxy_server_request")
+        }
+    )
     request_provider: Final = provider(request)
     if request_provider == "azure_ai" and litellm.enable_azure_ad_token_refresh is True:
-        return {**optional_params, "enable_azure_ad_token_refresh": True}
+        return MappingProxyType({**optional_params, "enable_azure_ad_token_refresh": True})
     if request_provider != "vertex_ai":
         return optional_params
     project: Final = (
@@ -177,25 +179,36 @@ def _optional_params(request: LiteLLMOcrRequest, resolve_secret: Callable[[str],
         or resolve_secret("VERTEXAI_LOCATION")
         or resolve_secret("VERTEX_LOCATION")
     )
-    return {
-        **optional_params,
-        **({"vertex_project": project} if project is not None else {}),
-        **({"vertex_location": location} if location is not None else {}),
-    }
+    vertex_params: Final = MappingProxyType(
+        {
+            name: value
+            for name, value in (("vertex_project", project), ("vertex_location", location))
+            if value is not None
+        }
+    )
+    return MappingProxyType({**optional_params, **vertex_params})
 
 
 def _input_sources(request: LiteLLMOcrRequest, optional_params: Mapping[str, object]) -> Mapping[str, str]:
     proxy_request_value: Final = request.kwargs.get("proxy_server_request")
     if not isinstance(proxy_request_value, Mapping):
         return MappingProxyType({})
-    proxy_request: Final = cast(Mapping[object, object], proxy_request_value)
-    request_fields_value = proxy_request.get("body_fields")
+    proxy_request: Final = cast(  # cast-ok: runtime Mapping check narrows metadata with unknown key and value types
+        Mapping[object, object], proxy_request_value
+    )
+    request_fields_value: Final = proxy_request.get("body_fields")
     request_fields: Sequence[object]
     if isinstance(request_fields_value, Sequence) and not isinstance(request_fields_value, (str, bytes)):
-        request_fields = cast(Sequence[object], request_fields_value)
+        request_fields = cast(  # cast-ok: runtime Sequence check excludes scalar strings and bytes
+            Sequence[object], request_fields_value
+        )
     else:
         body_value: Final = proxy_request.get("body")
-        request_fields = tuple(cast(Mapping[object, object], body_value)) if isinstance(body_value, Mapping) else ()
+        request_fields = (
+            tuple(cast(Mapping[object, object], body_value))  # cast-ok: runtime Mapping check establishes iterable keys
+            if isinstance(body_value, Mapping)
+            else ()
+        )
     names: Final = frozenset(optional_params) | frozenset({"api_key", "api_base", "extra_headers"})
     request_sources: Final = MappingProxyType({name: "request" for name in names if name in request_fields})
     if litellm.enable_azure_ad_token_refresh is True and "enable_azure_ad_token_refresh" in optional_params:
@@ -229,21 +242,30 @@ def _marshal(
             if name != "proxy_server_request"
         }
     )
-    logging_obj: Final = cast(_OCRLogging, request.kwargs["litellm_logging_obj"])
+    logging_obj: Final = cast(  # cast-ok: client decorator injects the logging object through untyped kwargs
+        _OCRLogging, request.kwargs["litellm_logging_obj"]
+    )
     logging_obj.update_from_kwargs(
-        kwargs=dict(logged_kwargs),
+        kwargs=dict(logged_kwargs),  # mutable-ok: legacy logging mutates its kwargs copy
         model=request.model,
-        optional_params=dict(logged_optional_params),
-        litellm_params={"litellm_call_id": request.kwargs.get("litellm_call_id"), "api_base": request.api_base},
+        optional_params=dict(logged_optional_params),  # mutable-ok: legacy logging requires concrete dict params
+        litellm_params={  # mutable-ok: legacy logging requires a concrete params dict
+            "litellm_call_id": request.kwargs.get("litellm_call_id"),
+            "api_base": request.api_base,
+        },
         custom_llm_provider=request_provider,
     )
     logging_obj.pre_call(
         input="OCR document processing",
         api_key=api_key,
-        additional_args={
-            "complete_input_dict": {"model": request.model, "document": document, **logged_optional_params},
+        additional_args={  # mutable-ok: pre_call mutates the additional_args dict
+            "complete_input_dict": {  # mutable-ok: callbacks consume a JSON-serializable request dict
+                "model": request.model,
+                "document": document,
+                **logged_optional_params,
+            },
             "api_base": request.api_base or "",
-            "headers": request.extra_headers or {},
+            "headers": request.extra_headers or {},  # mutable-ok: logging callbacks consume a concrete headers dict
         },
     )
     return LiteLLMOcrRequest(
@@ -260,7 +282,7 @@ def _marshal(
 
 
 def _map_error(error: Exception, request: LiteLLMOcrRequest) -> Exception:
-    exception_types = native_exception_types()
+    exception_types: Final = native_exception_types()
     if exception_types is None or not isinstance(error, exception_types[1]):
         return error
     request_provider: Final = provider(request)
@@ -271,11 +293,19 @@ def _map_error(error: Exception, request: LiteLLMOcrRequest) -> Exception:
     )
     if provider_config is None:
         return error
-    error_args = cast(tuple[object, ...], error.args)
+    error_args: Final = cast(  # cast-ok: BaseException.args exposes Any while native errors carry scalar args
+        tuple[object, ...], error.args
+    )
     status: Final = error_args[0] if error_args and isinstance(error_args[0], int) else 500
     message: Final = str(error_args[1]) if len(error_args) > 1 else str(error)
-    error_factory = cast(Callable[..., Exception], provider_config.get_error_class)
-    return error_factory(error_message=message, status_code=status or 500, headers={})
+    error_factory: Final = cast(  # cast-ok: legacy provider error factories have untyped callable parameters
+        Callable[..., Exception], provider_config.get_error_class
+    )
+    return error_factory(
+        error_message=message,
+        status_code=status or 500,
+        headers={},  # mutable-ok: provider error factories require a concrete headers dict
+    )
 
 
 def run(
@@ -289,12 +319,12 @@ def run(
     try:
         response: Final = ocr(
             model=marshalled.model,
-            document=dict(marshalled.document),
+            document=dict(marshalled.document),  # mutable-ok: PyO3 OCR binding requires a concrete dict
             api_key=marshalled.api_key,
             api_base=marshalled.api_base,
             custom_llm_provider=marshalled.custom_llm_provider,
             extra_headers=marshalled.extra_headers,
-            optional_params=dict(marshalled.kwargs),
+            optional_params=dict(marshalled.kwargs),  # mutable-ok: PyO3 OCR binding requires a concrete dict
             input_sources=marshalled.input_sources,
             timeout=marshalled.timeout,
         )
@@ -314,12 +344,12 @@ async def arun(
     try:
         response: Final = await aocr(
             model=marshalled.model,
-            document=dict(marshalled.document),
+            document=dict(marshalled.document),  # mutable-ok: PyO3 OCR binding requires a concrete dict
             api_key=marshalled.api_key,
             api_base=marshalled.api_base,
             custom_llm_provider=marshalled.custom_llm_provider,
             extra_headers=marshalled.extra_headers,
-            optional_params=dict(marshalled.kwargs),
+            optional_params=dict(marshalled.kwargs),  # mutable-ok: PyO3 OCR binding requires a concrete dict
             input_sources=marshalled.input_sources,
             timeout=marshalled.timeout,
         )
